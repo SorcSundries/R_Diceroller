@@ -26,7 +26,6 @@ getspecs <- function(count) {
         rollspecs <- readline(prompt = "")
     }
 
-
     rollspecslower <- tolower(rollspecs) #get it in lowercase
 
     #in the special case where there are spaces but not +/-, replace spaces with +'s, allowing entry like: 3d5 d20 15 to be seen as 3d5+d20+15
@@ -42,12 +41,6 @@ getspecs <- function(count) {
     rollspecslower <- gsub('[d]+','d',rollspecslower) #reduce multiple d's in a row with a single d
 
     return(rollspecslower)
-
-
-
-    # add a special case where something like 'd20 5d3 2d4' interprets the spaces as +'s if there are no +'s/-'s
-
-
 }
 
 #allow y,Y,yes,Yes,true,TRUE,True or n,N,No,no,false,FALSE,False as responses to the show-specs prompt
@@ -77,14 +70,14 @@ diceroll <- function(dr.rollspecs, dr.showdetail) {
     #create an array for our roll specifications:
     #   Each row represents a separate roll term like: +2d7
     #   column 1 = +/- multiplier, column 2 = # of dice to roll, column 3 = size of dice to roll
-    rollarray <- array(0, dim = c(rolltermcount,3))
-    colnames(rollarray) = c("+/-","Count","Size")
+    rollarray <- array(0, dim = c(rolltermcount,4))
+    colnames(rollarray) = c("+/-","Count","Size","1xVar")
 
     #load column 1, the +/- multipliers
     rollarray[1,1] <- 1 #set the first term multiplier to 1, if the roll specs begin with - then the 1st term will be ""
     if (nchar(rollmultipliers) != 0) { #only do this if we actually have any terms, otherwise a single roll like "d20" gives an error
         for (i in 1:nchar(rollmultipliers)) {
-            #only need to fill in terms 2-to-termcount
+            #only need to fill in terms 2-to-termcount, understand that the 1st +/- applies to the 2nd term (due to the way the string is split)
             if (substr(rollmultipliers, i, i) == "+") { rollarray[i + 1, 1] <- 1 } else { rollarray[i + 1, 1] <- -1 }
             #if (substr(rollmultipliers, i, i) == "-") { rollarray[i + 1, 1] <- -1 }
         }
@@ -130,6 +123,17 @@ diceroll <- function(dr.rollspecs, dr.showdetail) {
                 }
             }
         }
+
+    #calculate the variance for each diceroll so that we can get an overall standard deviation and maybe comment on the result
+    #luckily the variance of an N sided die has a general form: [Variance = ((N^2)-1)/12] You can look this up online to confirm
+    totalvariance <- 0 #initialize total variance, we'll sum this as we go
+    for (i in 1:rolltermcount) {
+        if (rollarray[i, 3] != 0) { #iff this is an actual dice roll, and not just a flat added number...
+            rollarray[i, 4] <- ((rollarray[i, 3] ^ 2) - 1) / 12
+            totalvariance <- totalvariance + (rollarray[i,2] * rollarray[i,4]) #add variances for independent events
+        }
+    }
+    totalstd <- sqrt(totalvariance)
 
     #initialize stats & variables for output
     cleanedrollspecs <- ""
@@ -198,14 +202,26 @@ diceroll <- function(dr.rollspecs, dr.showdetail) {
             }
         }
 
+    zscore <- (totalrollresult - avgresult) / totalstd
+
     if (debugmode) {
         print(rollarray)
-        cat("\n")} #show the array if debug set to true
+        cat("\n") } #show the array if debug set to true
 
-    cat(paste(sep = "","Result:   ", totalrollresult, "   Roll Specs:   ", cleanedrollspecs))
+    cat(paste(sep = "","[Result:]   ", totalrollresult, "    [Roll Specs:]   ", cleanedrollspecs))
 
-    if (dr.showdetail)
-    { cat(paste(sep = "", "\nIndividual rolls:   ", individualrollresulttext, "\nMin:  ", minresult, "    Avg:  ", avgresult, "    Max:  ", maxresult)) }
+    if (dr.showdetail) {
+        cat(paste(sep = "", "\n[Individual rolls:]   ", individualrollresulttext))
+        cat(paste(sep = "", "\n[Min:]  ", minresult, "    [Avg:]  ", avgresult, "    [Max:]  ", maxresult
+            , "    [Var:]  ", sprintf('%.3f', totalvariance), "    [Std Dev:]  ", sprintf('%.3f', totalstd)))
+        cat(paste(sep = "", "\n[Z-score:]  ", sprintf('%.3f', zscore),"    "))
+        if (zscore > 1)
+        { cat(paste(sep = "", "Result is high: within the top ", sprintf('%.0f', (1 - pnorm(zscore)) * 100), "% of rolls")) }
+        else if (zscore < -1)
+        { cat(paste(sep = "", "Result is low: within the bottom ", sprintf('%.0f', (pnorm(zscore)) * 100), "% of rolls")) }
+        else
+        { cat(paste(sep = "", "Result is average: within the middle ", sprintf('%.0f', (0.5-pnorm(-1)) * 200), "% of rolls")) }
+    }
 
     cat("\n\nYou may continue entering new rolls below:")
 }
